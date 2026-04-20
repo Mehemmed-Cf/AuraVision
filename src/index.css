@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import 'leaflet/dist/leaflet.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --navy: #0a0e1a;
+  --navy-card: #111827;
+  --navy-raised: #1a2332;
+  --navy-border: #1e2d42;
+  --cyan: #00d4ff;
+  --cyan-hover: #00b8dc;
+  --cyan-dim: rgba(0, 212, 255, 0.1);
+  --cyan-glow: rgba(0, 212, 255, 0.25);
+  --text-1: #ffffff;
+  --text-2: #8b9ab4;
+  --text-3: #4a5568;
+  --success: #10b981;
+  --error: #ef4444;
+  --warning: #f59e0b;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+
+  /* Legacy aliases (existing components) */
+  --aura-navy: var(--navy);
+  --aura-navy-card: var(--navy-card);
+  --aura-navy-border: var(--navy-border);
+  --aura-cyan: var(--cyan);
+  --aura-cyan-dim: var(--cyan-hover);
+  --aura-cyan-glow: var(--cyan-dim);
+  --aura-text-primary: var(--text-1);
+  --aura-text-secondary: var(--text-2);
+  --aura-text-muted: var(--text-3);
+  --aura-success: var(--success);
+  --aura-error: var(--error);
+  --aura-warning: var(--warning);
+  --aura-radius-sm: var(--r-sm);
+  --aura-radius-md: var(--r-md);
+  --aura-radius-lg: var(--r-lg);
+  --aura-radius-xl: var(--r-xl);
+
+  --aura-circuit-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='none' stroke='%2300D4FF' stroke-width='0.5' opacity='0.04'%3E%3Cpath d='M0 20h40M20 0v40'/%3E%3Ccircle cx='20' cy='20' r='1.2' fill='%2300D4FF'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+body {
+  background: var(--navy);
+  color: var(--text-1);
+  font-family: Inter, system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Leaflet dark theme tweaks */
+.leaflet-container {
+  background: var(--navy);
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--navy-card);
+  color: var(--text-1);
+  border: 1px solid var(--navy-border);
+  border-radius: var(--r-md);
+}
+
+.leaflet-popup-tip {
+  background: var(--navy-card);
+}
+
+.auth-circuit-bg {
+  background-color: var(--navy);
+  background-image: var(--aura-circuit-pattern);
+  background-size: 40px 40px;
+}
+
+.aura-marker-wrap {
+  background: transparent !important;
+  border: none !important;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--cyan-dim);
+}
