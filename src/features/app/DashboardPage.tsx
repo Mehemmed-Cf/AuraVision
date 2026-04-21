@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion';
 import { Route, Shield, Wind } from 'lucide-react';
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AddressAutocomplete } from '@/components/location/AddressAutocomplete';
+import type { AddressSuggestion } from '@/services/locationService';
 import { useAuthStore } from '@/stores/authStore';
 import {
   BARRIER_TYPE_LABEL,
@@ -46,16 +47,17 @@ export function DashboardPage() {
   const recent = getRecentReports(5);
   const barrierTotal = getAllReports().length;
 
-  const { register, handleSubmit } = useForm<{ from: string; to: string }>({
-    defaultValues: { from: 'Nizami m/st', to: 'Sahil bulvarı' },
-  });
-
   const calculateRoute = useRouteStore((s) => s.calculateRoute);
   const routeLoading = useRouteStore((s) => s.isLoading);
   const routeResult = useRouteStore((s) => s.lastResult);
   const clearRoute = useRouteStore((s) => s.clearResult);
+  const routeError = useRouteStore((s) => s.error);
 
   const [mockKm] = useState(() => (4 + Math.random() * 2).toFixed(1));
+  const [fromAddress, setFromAddress] = useState('Nizami m/st');
+  const [toAddress, setToAddress] = useState('Sahil bulvarı');
+  const [fromSelection, setFromSelection] = useState<AddressSuggestion | null>(null);
+  const [toSelection, setToSelection] = useState<AddressSuggestion | null>(null);
 
   if (!user) return null;
 
@@ -67,12 +69,18 @@ export function DashboardPage() {
     standard: 'Standart',
   };
 
-  const onRoute = async (data: { from: string; to: string }) => {
+  const onRoute = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!fromSelection || !toSelection) return;
     clearRoute();
     await calculateRoute({
-      from: data.from,
-      to: data.to,
+      from: fromSelection.displayName,
+      to: toSelection.displayName,
       profile: mobility,
+      fromLat: fromSelection.lat,
+      fromLng: fromSelection.lng,
+      toLat: toSelection.lat,
+      toLng: toSelection.lng,
     });
   };
 
@@ -140,30 +148,50 @@ export function DashboardPage() {
 
       <section className="rounded-[var(--r-lg)] border border-[var(--navy-border)] bg-[var(--navy-card)] p-5">
         <h3 className="mb-4 text-[18px] font-semibold text-[var(--text-1)]">Marşrut Hesabla</h3>
-        <form className="space-y-4" onSubmit={handleSubmit(onRoute)}>
+        <form className="space-y-4" onSubmit={onRoute}>
           <div>
-            <label className="mb-1 block text-[13px] text-[var(--text-2)]">Haradan:</label>
-            <input
-              className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[rgba(255,255,255,0.05)] px-3 py-2.5 text-[15px] text-[var(--text-1)]"
-              {...register('from')}
+            <AddressAutocomplete
+              label="Haradan:"
+              value={fromAddress}
+              onChange={(v) => {
+                setFromAddress(v);
+                setFromSelection(null);
+              }}
+              onSelect={(selection) => {
+                setFromAddress(selection.displayName);
+                setFromSelection(selection);
+              }}
               aria-label="Haradan"
+              placeholder="Başlanğıc ünvanı daxil edin"
             />
           </div>
           <div>
-            <label className="mb-1 block text-[13px] text-[var(--text-2)]">Haraya:</label>
-            <input
-              className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[rgba(255,255,255,0.05)] px-3 py-2.5 text-[15px] text-[var(--text-1)]"
-              {...register('to')}
+            <AddressAutocomplete
+              label="Haraya:"
+              value={toAddress}
+              onChange={(v) => {
+                setToAddress(v);
+                setToSelection(null);
+              }}
+              onSelect={(selection) => {
+                setToAddress(selection.displayName);
+                setToSelection(selection);
+              }}
               aria-label="Haraya"
+              placeholder="Təyinat ünvanını daxil edin"
             />
           </div>
           <button
             type="submit"
-            disabled={routeLoading}
+            disabled={routeLoading || !fromSelection || !toSelection}
             className="h-12 w-full rounded-[var(--r-md)] bg-[var(--cyan)] font-semibold text-[var(--navy)] disabled:opacity-60"
           >
             {routeLoading ? 'Hesablanır...' : 'Hesabla'}
           </button>
+          {(!fromSelection || !toSelection) && !routeLoading ? (
+            <p className="text-[12px] text-[var(--text-3)]">Marşrutu hesablamaq üçün siyahıdan hər iki ünvanı seçin.</p>
+          ) : null}
+          {routeError ? <p className="text-[12px] text-[var(--error)]">{routeError}</p> : null}
         </form>
 
         {routeResult ? (

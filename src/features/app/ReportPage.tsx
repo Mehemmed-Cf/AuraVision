@@ -1,9 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { motion } from 'framer-motion';
-import { Check, MapPin } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
+import { AddressAutocomplete } from '@/components/location/AddressAutocomplete';
+import type { AddressSuggestion } from '@/services/locationService';
 import { useAuthStore } from '@/stores/authStore';
 import { BARRIER_TYPE_LABEL, type BarrierType } from '@/stores/mapStore';
 import { useMapStore } from '@/stores/mapStore';
@@ -31,6 +33,7 @@ export function ReportPage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [inclusivity, setInclusivity] = useState(0);
+  const [addressText, setAddressText] = useState('');
 
   const {
     register,
@@ -63,6 +66,13 @@ export function ReportPage() {
   const mockLocation = () => {
     setValue('lat', 40.41 + Math.random() * 0.01);
     setValue('lng', 49.86 + Math.random() * 0.02);
+  };
+
+  const onAddressSelect = (selection: AddressSuggestion) => {
+    setAddressText(selection.displayName);
+    setValue('address', selection.displayName, { shouldValidate: true });
+    setValue('lat', selection.lat);
+    setValue('lng', selection.lng);
   };
 
   const onSubmit = (data: ReportFormValues) => {
@@ -159,13 +169,16 @@ export function ReportPage() {
           <div>
             <label className="mb-1 block text-[13px] text-[var(--text-2)]">Ünvan</label>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <div className="relative flex-1">
-                <MapPin className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[var(--text-3)]" />
-                <input
-                  className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[rgba(255,255,255,0.05)] py-2.5 pl-10 pr-3 text-[15px] text-[var(--text-1)]"
+              <div className="relative z-20 flex-1">
+                <AddressAutocomplete
+                  value={addressText}
+                  onChange={(v) => {
+                    setAddressText(v);
+                    setValue('address', v, { shouldValidate: true });
+                  }}
+                  onSelect={onAddressSelect}
                   aria-label="Ünvan"
-                  aria-describedby={errors.address ? 'addr-err' : undefined}
-                  {...register('address')}
+                  placeholder="Ünvan axtarın"
                 />
               </div>
               <button
@@ -181,6 +194,7 @@ export function ReportPage() {
                 {errors.address.message}
               </p>
             ) : null}
+            <input type="hidden" {...register('address')} />
           </div>
 
           <div>

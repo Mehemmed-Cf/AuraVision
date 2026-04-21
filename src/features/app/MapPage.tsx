@@ -2,35 +2,38 @@ import { AnimatePresence, motion } from 'framer-motion';
 import L from 'leaflet';
 import { MapPin, Plus, ThumbsUp } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MapContainer, Marker, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, TileLayer, useMap, ZoomControl } from 'react-leaflet';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import {
   BAKU_CENTER,
   BARRIER_TYPE_LABEL,
   FILTER_CHIPS,
+  PROFILE_ROADS,
   type BarrierReport,
-  type BarrierSeverity,
   type BarrierType,
 } from '@/stores/mapStore';
 import { useMapStore } from '@/stores/mapStore';
+import { useRouteStore } from '@/stores/routeStore';
 
-function iconFor(severity: BarrierSeverity) {
-  const bg =
-    severity === 'high' ? '#EF4444' : severity === 'medium' ? '#F59E0B' : '#10B981';
-  const inner =
-    severity === 'high'
-      ? `<span style="font-weight:700;font-size:14px;color:#fff">!</span>`
-      : '';
-  const size = severity === 'high' ? 28 : 24;
-  const html = `<div class="${severity === 'high' ? 'aura-pulse' : ''}" style="width:${size}px;height:${size}px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-sizing:border-box">${inner}</div>`;
+function markerIcon(severity: 'low' | 'medium' | 'high') {
+  const color = severity === 'high' ? '#ef4444' : severity === 'medium' ? '#f59e0b' : '#10b981';
   return L.divIcon({
     className: 'aura-marker-wrap',
-    html,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -size / 2],
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,0.25)"></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
   });
+}
+
+/** react-leaflet's whenReady is () => void; Leaflet map is available via useMap here. */
+function MapInvalidateOnReady() {
+  const map = useMap();
+  useEffect(() => {
+    const id = setTimeout(() => map.invalidateSize(), 100);
+    return () => clearTimeout(id);
+  }, [map]);
+  return null;
 }
 
 function MapResize({ selected }: { selected: BarrierReport | null }) {
@@ -55,6 +58,9 @@ export function MapPage() {
 
   const [filter, setFilter] = useState<BarrierType | 'all'>('all');
   const [selected, setSelected] = useState<BarrierReport | null>(null);
+  const user = useAuthStore((s) => s.user);
+  const routeResult = useRouteStore((s) => s.lastResult);
+  const activeProfile = user?.mobilityProfile ?? 'standard';
 
   const reports = useMemo(() => {
     const all = [...submittedReports, ...seededReports];
@@ -69,13 +75,18 @@ export function MapPage() {
     });
   }, [reports]);
 
-  const iconsById = useMemo(() => {
-    const m = new Map<string, L.DivIcon>();
-    reports.forEach((r) => {
-      m.set(r.id, iconFor(r.severity));
-    });
-    return m;
-  }, [reports]);
+  const profileRoads = useMemo(
+    () => PROFILE_ROADS.filter((road) => road.recommendedFor.includes(activeProfile)),
+    [activeProfile],
+  );
+
+  const selectedRoads = useMemo(() => {
+    if (!routeResult) return profileRoads;
+    const byId = new Set(routeResult.profileRoadIds);
+    const matched = PROFILE_ROADS.filter((road) => byId.has(road.id));
+    return matched.length > 0 ? matched : profileRoads;
+  }, [routeResult, profileRoads]);
+  const routePath = useMemo(() => routeResult?.waypoints ?? [], [routeResult]);
 
   const onVote = useCallback(
     (id: string) => {
@@ -89,9 +100,19 @@ export function MapPage() {
   );
 
   return (
-    <div className="relative h-[calc(100dvh-124px-env(safe-area-inset-bottom))] min-h-[320px] w-full bg-[var(--navy)]">
-      <div className="pointer-events-none absolute left-2 right-2 top-2 z-[500] flex flex-wrap gap-2">
-        <div className="pointer-events-auto flex flex-wrap gap-2 rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-card)]/90 p-2 backdrop-blur-md">
+    <div style={{ position: 'relative', height: '100%' }}>
+      <div
+        style={{
+          position: 'fixed',
+          top: '60px',
+          left: 0,
+          right: 0,
+          zIndex: 1000,
+          padding: '12px 16px',
+          background: 'var(--navy-card)',
+        }}
+      >
+        <div className="flex flex-wrap gap-2">
           {FILTER_CHIPS.map((c) => (
             <button
               key={c.key}
@@ -110,33 +131,59 @@ export function MapPage() {
         </div>
       </div>
 
-      <MapContainer
-        center={BAKU_CENTER}
-        zoom={13}
-        className="h-full w-full rounded-none"
-        scrollWheelZoom
-        aria-label="Bakı əlçatanlıq xəritəsi"
+      <div
+        style={{
+          position: 'fixed',
+          top: '116px',
+          left: 0,
+          right: 0,
+          bottom: '64px',
+          zIndex: 0,
+        }}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        />
-        <MapResize selected={selected} />
-        {reports.map((r) => (
-          <Marker
-            key={r.id}
-            position={[r.lat, r.lng]}
-            icon={iconsById.get(r.id)!}
-            eventHandlers={{
-              click: () => setSelected(r),
-            }}
+        <MapContainer
+          center={BAKU_CENTER}
+          zoom={13}
+          className="rounded-none"
+          scrollWheelZoom
+          preferCanvas
+          zoomControl={false}
+          style={{ height: '100%', width: '100%' }}
+        >
+          <TileLayer
+            attribution=""
+            maxZoom={19}
+            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           />
-        ))}
-      </MapContainer>
+          <ZoomControl position="bottomright" />
+          <MapInvalidateOnReady />
+          <MapResize selected={selected} />
+          {routePath.length > 1 ? (
+            <Polyline positions={routePath} pathOptions={{ color: '#00d4ff', weight: 4, opacity: 0.95 }} />
+          ) : (
+            selectedRoads.map((road) => (
+              <Polyline
+                key={road.id}
+                positions={road.points}
+                pathOptions={{ color: '#00d4ff', weight: 4, opacity: 0.85 }}
+              />
+            ))
+          )}
+          {reports.map((r) => (
+            <Marker
+              key={r.id}
+              position={[r.lat, r.lng]}
+              icon={markerIcon(r.severity)}
+              eventHandlers={{ click: () => setSelected(r) }}
+            />
+          ))}
+        </MapContainer>
+      </div>
 
       <Link
         to="/report"
-        className="fixed bottom-[88px] right-4 z-[600] flex h-14 w-14 items-center justify-center rounded-full bg-[var(--cyan)] text-[var(--navy)] shadow-lg"
+        style={{ position: 'fixed', bottom: '80px', right: '20px', zIndex: 1000 }}
+        className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--cyan)] text-[var(--navy)] shadow-lg"
         aria-label="Yeni maneə bildir"
       >
         <Plus className="h-7 w-7" strokeWidth={2.5} />
@@ -219,13 +266,6 @@ export function MapPage() {
         ) : null}
       </AnimatePresence>
 
-      <style>{`
-        @keyframes aura-pulse-kf {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.15); }
-        }
-        .aura-pulse { animation: aura-pulse-kf 1.2s ease-in-out infinite; }
-      `}</style>
     </div>
   );
 }

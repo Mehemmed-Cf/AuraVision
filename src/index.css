@@ -1,8 +1,8 @@
+@import 'leaflet/dist/leaflet.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import 'leaflet/dist/leaflet.css';
 
 * {
   margin: 0;
@@ -62,32 +62,20 @@ body {
   min-height: 100vh;
 }
 
-/* Leaflet dark theme tweaks */
 .leaflet-container {
   background: var(--navy);
   font-family: Inter, system-ui, sans-serif;
 }
 
-.leaflet-popup-content-wrapper {
-  background: var(--navy-card);
-  color: var(--text-1);
-  border: 1px solid var(--navy-border);
-  border-radius: var(--r-md);
-}
-
-.leaflet-popup-tip {
-  background: var(--navy-card);
+.aura-marker-wrap {
+  background: transparent !important;
+  border: none !important;
 }
 
 .auth-circuit-bg {
   background-color: var(--navy);
   background-image: var(--aura-circuit-pattern);
   background-size: 40px 40px;
-}
-
-.aura-marker-wrap {
-  background: transparent !important;
-  border: none !important;
 }
 
 input:focus,

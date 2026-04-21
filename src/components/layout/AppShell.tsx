@@ -37,6 +37,7 @@ export function AppShell() {
   }, [user?.mobilityProfile, setActiveProfile]);
 
   const ini = user ? initials(user.name) : '?';
+  const isMapPage = location.pathname === '/map';
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--navy)]">
@@ -90,19 +91,26 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-auto pb-[72px]">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={location.pathname}
-            className="min-h-full"
-            variants={pageVariants}
-            initial="initial"
-            animate="animate"
-            exit="exit"
-          >
-            <Outlet />
-          </motion.div>
-        </AnimatePresence>
+      <main
+        className="min-h-0 flex-1 pb-[72px]"
+        style={{ overflow: isMapPage ? 'hidden' : 'auto', height: isMapPage ? '100%' : 'auto' }}
+      >
+        {isMapPage ? (
+          <Outlet />
+        ) : (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              className="min-h-full"
+              variants={pageVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
+        )}
       </main>
 
       <nav
