@@ -2,6 +2,7 @@ import { motion } from 'framer-motion';
 import { Loader2, MapPin, Route, Shield, Wind } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { getRouteCommentary } from '@/services/ai/openaiClient';
 import { useAuthStore } from '@/stores/authStore';
 import {
   BARRIER_TYPE_LABEL,
@@ -47,6 +48,17 @@ interface RoutePointSelection {
   displayName: string;
   lat: number;
   lng: number;
+}
+
+function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 function RouteNominatimField({
@@ -186,6 +198,13 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const mobility = user?.mobilityProfile ?? 'standard';
+  const mobilityLabel: Record<string, string> = {
+    wheelchair: 'Əlil arabası',
+    visual: 'Görmə məhdudiyyəti',
+    respiratory: 'Tənəffüs xəstəliyi',
+    stroller: 'Uşaq arabası',
+    standard: 'Standart',
+  };
 
   const getRecentReports = useMapStore((s) => s.getRecentReports);
   const getAllReports = useMapStore((s) => s.getAllReports);
@@ -203,6 +222,8 @@ export function DashboardPage() {
   const [toAddress, setToAddress] = useState('');
   const [fromSelection, setFromSelection] = useState<RoutePointSelection | null>(null);
   const [toSelection, setToSelection] = useState<RoutePointSelection | null>(null);
+  const [aiCommentary, setAiCommentary] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const fillFromGeolocation = useCallback(() => {
     if (!navigator.geolocation) return;
@@ -238,15 +259,53 @@ export function DashboardPage() {
     fillFromGeolocation();
   }, [fillFromGeolocation]);
 
-  if (!user) return null;
+  useEffect(() => {
+    let active = true;
+    const generateCommentary = async () => {
+      if (!routeResult) {
+        setAiCommentary(null);
+        setAiLoading(false);
+        return;
+      }
 
-  const mobilityLabel: Record<string, string> = {
-    wheelchair: 'Əlil arabası',
-    visual: 'Görmə məhdudiyyəti',
-    respiratory: 'Tənəffüs xəstəliyi',
-    stroller: 'Uşaq arabası',
-    standard: 'Standart',
-  };
+      setAiLoading(true);
+      setAiCommentary(null);
+
+      const nearbyReports = getAllReports().filter((report) =>
+        routeResult.waypoints.some(
+          ([lat, lng]) =>
+            haversineMeters({ lat, lng }, { lat: report.lat, lng: report.lng }) <= 150,
+        ),
+      );
+
+      const barrierTypeCounts = nearbyReports.reduce<Record<string, number>>((acc, report) => {
+        acc[BARRIER_TYPE_LABEL[report.type]] = (acc[BARRIER_TYPE_LABEL[report.type]] ?? 0) + 1;
+        return acc;
+      }, {});
+
+      const commentary = await getRouteCommentary({
+        mobilityProfile: mobilityLabel[mobility] ?? mobility,
+        inclusivityIndex: routeResult.inclusivityIndex,
+        barrierCount: routeResult.barrierCount,
+        barrierTypeCounts,
+        distance: routeResult.distance,
+        duration: routeResult.duration,
+        warnings: routeResult.warnings,
+      });
+
+      if (!active) return;
+      setAiCommentary(commentary);
+      setAiLoading(false);
+    };
+
+    void generateCommentary();
+
+    return () => {
+      active = false;
+    };
+  }, [routeResult, getAllReports, mobility]);
+
+  if (!user) return null;
 
   const onRoute = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -424,6 +483,23 @@ export function DashboardPage() {
               >
                 {routeResult.inclusivityIndex}
               </p>
+            </div>
+            <div className="rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-raised)] p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-[13px] font-medium text-[var(--text-2)]">AI şərh</span>
+                <span className="rounded-full bg-[var(--cyan-dim)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--cyan)]">
+                  AI
+                </span>
+              </div>
+              {aiLoading ? (
+                <div className="space-y-2" aria-hidden="true">
+                  <div className="h-3 w-full animate-pulse rounded bg-[var(--navy-border)]" />
+                  <div className="h-3 w-[88%] animate-pulse rounded bg-[var(--navy-border)]" />
+                  <div className="h-3 w-[70%] animate-pulse rounded bg-[var(--navy-border)]" />
+                </div>
+              ) : aiCommentary ? (
+                <p className="text-[13px] leading-relaxed text-[var(--text-2)]">{aiCommentary}</p>
+              ) : null}
             </div>
             <div className="flex justify-between gap-4 text-[14px] text-[var(--text-2)]">
               <span>Məsafə: {routeResult.distance}</span>
