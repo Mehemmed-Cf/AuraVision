@@ -82,7 +82,13 @@ export function RegisterPage() {
 
   if (uiStep === 'success') {
     return (
-      <div className="auth-circuit-bg flex min-h-screen items-center justify-center px-4 py-12">
+      <div className="auth-circuit-bg relative flex min-h-screen items-center justify-center px-4 py-12">
+        <Link
+          to="/"
+          className="absolute left-4 top-4 text-sm font-medium text-[var(--text-2)] transition-colors hover:text-[var(--cyan)] sm:left-6 sm:top-6"
+        >
+          ← Ana səhifə
+        </Link>
         <motion.div
           initial={{ scale: 0.85, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -108,7 +114,13 @@ export function RegisterPage() {
   }
 
   return (
-    <div className="auth-circuit-bg flex min-h-screen items-center justify-center overflow-y-auto px-4 py-12">
+    <div className="auth-circuit-bg relative flex min-h-screen items-center justify-center overflow-y-auto px-4 py-12">
+      <Link
+        to="/"
+        className="absolute left-4 top-4 z-10 text-sm font-medium text-[var(--text-2)] transition-colors hover:text-[var(--cyan)] sm:left-6 sm:top-6"
+      >
+        ← Ana səhifə
+      </Link>
       <AuthCard>
         <AuraLogo />
         <h1

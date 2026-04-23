@@ -69,11 +69,11 @@ export function AddressAutocomplete({
           }}
           placeholder={placeholder}
           aria-label={ariaLabel}
-          className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[rgba(255,255,255,0.05)] py-2.5 pl-10 pr-3 text-[15px] text-[var(--text-1)]"
+          className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-raised)] py-2.5 pl-10 pr-3 text-[15px] text-[var(--text-1)]"
         />
       </div>
       {open ? (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-64 overflow-auto rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-raised)]">
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-64 overflow-auto rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-raised)] shadow-lg">
           {loading ? (
             <div className="px-3 py-2 text-[13px] text-[var(--text-2)]">Axtarılır...</div>
           ) : results.length > 0 ? (
@@ -85,7 +85,7 @@ export function AddressAutocomplete({
                   onSelect(item);
                   setOpen(false);
                 }}
-                className="block w-full border-b border-[var(--navy-border)] px-3 py-2 text-left text-[13px] text-[var(--text-1)] last:border-b-0 hover:bg-[var(--cyan-dim)]"
+                className="block w-full border border-transparent border-b-[var(--navy-border)] px-3 py-2 text-left text-[13px] text-[var(--text-1)] last:border-b-0 hover:border-[var(--cyan)] hover:bg-[var(--cyan-dim)]"
               >
                 {item.displayName}
               </button>

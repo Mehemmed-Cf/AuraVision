@@ -56,7 +56,13 @@ export function LoginPage() {
   };
 
   return (
-    <div className="auth-circuit-bg flex min-h-screen items-center justify-center px-4 py-12">
+    <div className="auth-circuit-bg relative flex min-h-screen flex-col items-center justify-center px-4 py-12">
+      <Link
+        to="/"
+        className="absolute left-4 top-4 text-sm font-medium text-[var(--text-2)] transition-colors hover:text-[var(--cyan)] sm:left-6 sm:top-6"
+      >
+        ← Ana səhifə
+      </Link>
       <motion.div
         key={shakeKey}
         initial={{ x: 0 }}

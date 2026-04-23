@@ -1,12 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import L from 'leaflet';
-import { MapPin, Plus, ThumbsUp } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { MapContainer, Marker, Polyline, TileLayer, useMap, ZoomControl } from 'react-leaflet';
+import mapboxgl from 'mapbox-gl';
+import { MapPin, MapPinned, Navigation, Navigation2, Plus, ThumbsUp } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Map, { Layer, Marker, Source, type MapRef } from 'react-map-gl/mapbox';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import {
-  BAKU_CENTER,
   BARRIER_TYPE_LABEL,
   FILTER_CHIPS,
   PROFILE_ROADS,
@@ -16,41 +15,53 @@ import {
 import { useMapStore } from '@/stores/mapStore';
 import { useRouteStore } from '@/stores/routeStore';
 
-function markerIcon(severity: 'low' | 'medium' | 'high') {
-  const color = severity === 'high' ? '#ef4444' : severity === 'medium' ? '#f59e0b' : '#10b981';
-  return L.divIcon({
-    className: 'aura-marker-wrap',
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,0.25)"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
-  });
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? '';
+
+function markerColor(severity: 'low' | 'medium' | 'high') {
+  return severity === 'high' ? '#ef4444' : severity === 'medium' ? '#f59e0b' : '#10b981';
 }
 
-/** react-leaflet's whenReady is () => void; Leaflet map is available via useMap here. */
-function MapInvalidateOnReady() {
-  const map = useMap();
-  useEffect(() => {
-    const id = setTimeout(() => map.invalidateSize(), 100);
-    return () => clearTimeout(id);
-  }, [map]);
-  return null;
-}
+function RouteEndpointMarkers({ routePath }: { routePath: [number, number][] }) {
+  if (routePath.length < 2) return null;
+  const [startLat, startLng] = routePath[0]!;
+  const [endLat, endLng] = routePath[routePath.length - 1]!;
+  const pinClass =
+    'pointer-events-none flex flex-col items-center drop-shadow-[0_4px_12px_rgba(0,0,0,0.45)]';
 
-function MapResize({ selected }: { selected: BarrierReport | null }) {
-  const map = useMap();
-  useEffect(() => {
-    const id = requestAnimationFrame(() => map.invalidateSize());
-    return () => cancelAnimationFrame(id);
-  }, [map]);
-  useEffect(() => {
-    if (selected) {
-      map.setView([selected.lat, selected.lng], 15, { animate: true });
-    }
-  }, [map, selected]);
-  return null;
+  return (
+    <>
+      <Marker longitude={startLng} latitude={startLat} anchor="bottom">
+        <div className={pinClass} role="img" aria-label="Marşrutun başlanğıcı">
+          <div className="flex flex-col items-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full border-[3px] border-white bg-emerald-500 shadow-lg ring-2 ring-emerald-900/40">
+              <Navigation2 className="h-5 w-5 text-white" strokeWidth={2.25} aria-hidden="true" />
+            </div>
+            <span className="mt-1 max-w-[100px] truncate rounded bg-[var(--navy-card)]/95 px-2 py-0.5 text-center text-[10px] font-bold uppercase tracking-wide text-emerald-300 ring-1 ring-emerald-500/50">
+              Başlanğıc
+            </span>
+          </div>
+        </div>
+      </Marker>
+      <Marker longitude={endLng} latitude={endLat} anchor="bottom">
+        <div className={pinClass} role="img" aria-label="Marşrutun hədəfi">
+          <div className="flex flex-col items-center">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full border-[3px] border-white bg-[var(--cyan)] shadow-lg ring-2 ring-[var(--cyan)]/30">
+              <MapPinned className="h-5 w-5 text-[var(--navy)]" strokeWidth={2.25} aria-hidden="true" />
+            </div>
+            <span className="mt-1 max-w-[100px] truncate rounded bg-[var(--navy-card)]/95 px-2 py-0.5 text-center text-[10px] font-bold uppercase tracking-wide text-[var(--cyan)] ring-1 ring-[var(--cyan)]/40">
+              Hədəf
+            </span>
+          </div>
+        </div>
+      </Marker>
+    </>
+  );
 }
 
 export function MapPage() {
+  const mapRef = useRef<MapRef>(null);
+  const mapWrapRef = useRef<HTMLDivElement>(null);
+
   const seededReports = useMapStore((s) => s.seededReports);
   const submittedReports = useMapStore((s) => s.submittedReports);
   const voteReport = useMapStore((s) => s.voteReport);
@@ -86,7 +97,47 @@ export function MapPage() {
     const matched = PROFILE_ROADS.filter((road) => byId.has(road.id));
     return matched.length > 0 ? matched : profileRoads;
   }, [routeResult, profileRoads]);
+
   const routePath = useMemo(() => routeResult?.waypoints ?? [], [routeResult]);
+
+  const routeGeoJson = useMemo(() => {
+    if (routePath.length < 2) return null;
+    const coordinates = routePath.map(([lat, lng]) => [lng, lat] as [number, number]);
+    return {
+      type: 'Feature' as const,
+      properties: {},
+      geometry: { type: 'LineString' as const, coordinates },
+    };
+  }, [routePath]);
+
+  const fallbackGeoJson = useMemo(() => {
+    if (routePath.length > 1) return null;
+    return {
+      type: 'FeatureCollection' as const,
+      features: selectedRoads.map((road) => ({
+        type: 'Feature' as const,
+        properties: {},
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: road.points.map(([lat, lng]) => [lng, lat] as [number, number]),
+        },
+      })),
+    };
+  }, [routePath.length, selectedRoads]);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !selected) return;
+    map.flyTo({ center: [selected.lng, selected.lat], zoom: 15, duration: 600 });
+  }, [selected]);
+
+  useEffect(() => {
+    const el = mapWrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const onVote = useCallback(
     (id: string) => {
@@ -98,6 +149,21 @@ export function MapPage() {
     },
     [voteReport, incrementVoteUser],
   );
+
+  const flyToMyLocation = useCallback(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        map.flyTo({
+          center: [pos.coords.longitude, pos.coords.latitude],
+          zoom: 16,
+          duration: 1000,
+        });
+      },
+      () => {},
+    );
+  }, []);
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
@@ -112,26 +178,49 @@ export function MapPage() {
           background: 'var(--navy-card)',
         }}
       >
-        <div className="flex flex-wrap gap-2">
-          {FILTER_CHIPS.map((c) => (
-            <button
-              key={c.key}
-              type="button"
-              onClick={() => setFilter(c.key)}
-              className={[
-                'rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors',
-                filter === c.key
-                  ? 'bg-[var(--cyan-dim)] text-[var(--cyan)]'
-                  : 'text-[var(--text-2)] hover:text-[var(--text-1)]',
-              ].join(' ')}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {FILTER_CHIPS.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setFilter(c.key)}
+                className={[
+                  'rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors',
+                  filter === c.key
+                    ? 'bg-[var(--cyan-dim)] text-[var(--cyan)]'
+                    : 'text-[var(--text-2)] hover:text-[var(--text-1)]',
+                ].join(' ')}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          {routePath.length >= 2 ? (
+            <div
+              className="flex shrink-0 items-center gap-4 border-t border-[var(--navy-border)] pt-2 text-[11px] text-[var(--text-2)] sm:border-0 sm:pt-0"
+              role="group"
+              aria-label="Marşrut işarələri"
             >
-              {c.label}
-            </button>
-          ))}
+              <span className="flex items-center gap-2">
+                <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+                  <span className="absolute h-4 w-4 rounded-full bg-emerald-500 ring-2 ring-white" />
+                </span>
+                Başlanğıc
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+                  <span className="absolute h-4 w-4 rounded-full bg-[var(--cyan)] ring-2 ring-white" />
+                </span>
+                Hədəf
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
 
       <div
+        ref={mapWrapRef}
         style={{
           position: 'fixed',
           top: '116px',
@@ -141,44 +230,114 @@ export function MapPage() {
           zIndex: 0,
         }}
       >
-        <MapContainer
-          center={BAKU_CENTER}
-          zoom={13}
-          className="rounded-none"
-          scrollWheelZoom
-          preferCanvas
-          zoomControl={false}
-          style={{ height: '100%', width: '100%' }}
+        <Map
+          ref={mapRef}
+          mapboxAccessToken={MAPBOX_TOKEN}
+          initialViewState={{ longitude: 49.8671, latitude: 40.4093, zoom: 14 }}
+          style={{ width: '100%', height: '100%' }}
+          mapStyle="mapbox://styles/mapbox/navigation-night-v1"
+          onLoad={() => {
+            const map = mapRef.current?.getMap();
+            if (!map) return;
+
+            if (routePath.length >= 2) {
+              const bounds = new mapboxgl.LngLatBounds();
+              routePath.forEach(([lat, lng]) => bounds.extend([lng, lat]));
+              map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 800 });
+              return;
+            }
+
+            if (!navigator.geolocation) return;
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                map.flyTo({
+                  center: [pos.coords.longitude, pos.coords.latitude],
+                  zoom: 15,
+                  duration: 1000,
+                });
+              },
+              () => {},
+            );
+          }}
         >
-          <TileLayer
-            attribution=""
-            maxZoom={19}
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          />
-          <ZoomControl position="bottomright" />
-          <MapInvalidateOnReady />
-          <MapResize selected={selected} />
-          {routePath.length > 1 ? (
-            <Polyline positions={routePath} pathOptions={{ color: '#00d4ff', weight: 4, opacity: 0.95 }} />
-          ) : (
-            selectedRoads.map((road) => (
-              <Polyline
-                key={road.id}
-                positions={road.points}
-                pathOptions={{ color: '#00d4ff', weight: 4, opacity: 0.85 }}
+          {routeGeoJson ? (
+            <Source id="aura-route" type="geojson" data={routeGeoJson}>
+              <Layer
+                id="aura-route-glow"
+                type="line"
+                paint={{
+                  'line-color': '#00D4FF',
+                  'line-width': 14,
+                  'line-opacity': 0.15,
+                }}
               />
-            ))
-          )}
+              <Layer
+                id="aura-route-core"
+                type="line"
+                paint={{
+                  'line-color': '#00D4FF',
+                  'line-width': 5,
+                  'line-opacity': 0.9,
+                }}
+              />
+            </Source>
+          ) : fallbackGeoJson && fallbackGeoJson.features.length > 0 ? (
+            <Source id="aura-fallback-routes" type="geojson" data={fallbackGeoJson}>
+              <Layer
+                id="aura-fallback-glow"
+                type="line"
+                paint={{
+                  'line-color': '#00D4FF',
+                  'line-width': 14,
+                  'line-opacity': 0.15,
+                }}
+              />
+              <Layer
+                id="aura-fallback-core"
+                type="line"
+                paint={{
+                  'line-color': '#00D4FF',
+                  'line-width': 5,
+                  'line-opacity': 0.85,
+                }}
+              />
+            </Source>
+          ) : null}
           {reports.map((r) => (
-            <Marker
-              key={r.id}
-              position={[r.lat, r.lng]}
-              icon={markerIcon(r.severity)}
-              eventHandlers={{ click: () => setSelected(r) }}
-            />
+            <Marker key={r.id} longitude={r.lng} latitude={r.lat} anchor="center">
+              <button
+                type="button"
+                className="cursor-pointer border-0 bg-transparent p-0"
+                aria-label={BARRIER_TYPE_LABEL[r.type]}
+                onClick={() => setSelected(r)}
+              >
+                <span
+                  className="block"
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: markerColor(r.severity),
+                    border: '2px solid #fff',
+                    boxShadow: '0 0 0 2px rgba(0,0,0,0.25)',
+                  }}
+                />
+              </button>
+            </Marker>
           ))}
-        </MapContainer>
+          <RouteEndpointMarkers routePath={routePath} />
+        </Map>
       </div>
+
+      <button
+        type="button"
+        style={{ position: 'fixed', bottom: '144px', right: '20px', zIndex: 1000 }}
+        className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--cyan)] text-[var(--navy)] shadow-lg"
+        aria-label="Mövqeyim"
+        onClick={flyToMyLocation}
+      >
+        <Navigation className="h-5 w-5" strokeWidth={2.5} aria-hidden="true" />
+      </button>
 
       <Link
         to="/report"
@@ -255,7 +414,6 @@ export function MapPage() {
                 type="button"
                 className="flex-1 rounded-[var(--r-md)] bg-[var(--cyan)] py-2.5 text-[14px] font-semibold text-[var(--navy)]"
                 onClick={() => {
-                  /* mock add to route */
                   setSelected(null);
                 }}
               >
@@ -265,7 +423,6 @@ export function MapPage() {
           </motion.div>
         ) : null}
       </AnimatePresence>
-
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { motion } from 'framer-motion';
-import { Check } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { Camera, Check } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { AddressAutocomplete } from '@/components/location/AddressAutocomplete';
@@ -25,15 +25,50 @@ const SEVERITY: { v: ReportFormValues['severity']; label: string; color: string 
   { v: 'high', label: 'Yüksək', color: 'var(--error)' },
 ];
 
+const YOLO_DETECTIONS = [
+  {
+    type: 'broken_ramp' as const,
+    severity: 'high' as const,
+    confidence: 94,
+    description: 'Sınıq pandus aşkarlandı. Səth ciddi şəkildə zədələnib.',
+  },
+  {
+    type: 'high_curb' as const,
+    severity: 'medium' as const,
+    confidence: 87,
+    description: 'Hündür səki kənarı aşkarlandı. Əlil arabası üçün çətin.',
+  },
+  {
+    type: 'poor_surface' as const,
+    severity: 'medium' as const,
+    confidence: 91,
+    description: 'Pis səth vəziyyəti. Çatlar və kövrəklər mövcuddur.',
+  },
+  {
+    type: 'no_ramp' as const,
+    severity: 'high' as const,
+    confidence: 89,
+    description: 'Pandus yoxdur. Pilləkən alternativi təklif edilmir.',
+  },
+];
+
+type YoloPick = (typeof YOLO_DETECTIONS)[number];
+
 export function ReportPage() {
   const addReport = useMapStore((s) => s.addReport);
   const incrementReports = useAuthStore((s) => s.incrementReportsSubmitted);
+
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const scanTimeoutsRef = useRef<number[]>([]);
 
   const [preview, setPreview] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [inclusivity, setInclusivity] = useState(0);
   const [addressText, setAddressText] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState('');
+  const [yoloBadge, setYoloBadge] = useState<YoloPick | null>(null);
 
   const {
     register,
@@ -56,12 +91,58 @@ export function ReportPage() {
   const typeVal = watch('type');
   const sevVal = watch('severity');
 
+  const clearScanTimeouts = useCallback(() => {
+    scanTimeoutsRef.current.forEach((id) => window.clearTimeout(id));
+    scanTimeoutsRef.current = [];
+  }, []);
+
+  useEffect(() => () => clearScanTimeouts(), [clearScanTimeouts]);
+
   const onDrop = useCallback((f: File | null) => {
     if (!f || !f.type.startsWith('image/')) return;
     setFileName(f.name);
     const url = URL.createObjectURL(f);
     setPreview(url);
+    setYoloBadge(null);
   }, []);
+
+  const runYoloScan = useCallback(
+    (file: File) => {
+      clearScanTimeouts();
+      setFileName(file.name);
+      const url = URL.createObjectURL(file);
+      setPreview(url);
+      setYoloBadge(null);
+      setScanning(true);
+      setScanStatus('Şəkil analiz edilir...');
+
+      const schedule = (fn: () => void, ms: number) => {
+        const id = window.setTimeout(fn, ms);
+        scanTimeoutsRef.current.push(id);
+      };
+
+      schedule(() => setScanStatus('Maneələr axtarılır...'), 800);
+      schedule(() => setScanStatus('YOLOv8 modeli işləyir...'), 800 + 1200);
+      schedule(() => setScanStatus('Nəticə hazırlanır...'), 800 + 1200 + 1000);
+      schedule(() => {
+        const pick = YOLO_DETECTIONS[Math.floor(Math.random() * YOLO_DETECTIONS.length)]!;
+        setValue('type', pick.type, { shouldValidate: true });
+        setValue('severity', pick.severity, { shouldValidate: true });
+        setValue('description', pick.description, { shouldValidate: true });
+        setYoloBadge(pick);
+        setScanning(false);
+        setScanStatus('');
+      }, 3800);
+    },
+    [clearScanTimeouts, setValue],
+  );
+
+  const onCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !file.type.startsWith('image/')) return;
+    runYoloScan(file);
+  };
 
   const mockLocation = () => {
     setValue('lat', 40.41 + Math.random() * 0.01);
@@ -177,7 +258,7 @@ export function ReportPage() {
                     setValue('address', v, { shouldValidate: true });
                   }}
                   onSelect={onAddressSelect}
-                  aria-label="Ünvan"
+                  ariaLabel="Ünvan"
                   placeholder="Ünvan axtarın"
                 />
               </div>
@@ -197,6 +278,23 @@ export function ReportPage() {
             <input type="hidden" {...register('address')} />
           </div>
 
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={onCameraChange}
+          />
+          <button
+            type="button"
+            onClick={() => cameraInputRef.current?.click()}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-[var(--r-md)] border-2 border-[var(--cyan)] bg-transparent text-[15px] font-semibold text-[var(--cyan)] transition-colors hover:bg-[var(--cyan-dim)]"
+          >
+            <Camera className="h-5 w-5" aria-hidden="true" />
+            Kamera ilə Tara
+          </button>
+
           <div>
             <p className="mb-2 text-[13px] text-[var(--text-2)]">Şəkil əlavə et</p>
             <label
@@ -209,7 +307,17 @@ export function ReportPage() {
                 onChange={(e) => onDrop(e.target.files?.[0] ?? null)}
               />
               {preview ? (
-                <img src={preview} alt="" className="max-h-48 rounded-[var(--r-md)] object-contain" />
+                <div className="relative w-full max-w-md">
+                  <img src={preview} alt="" className="max-h-48 w-full rounded-[var(--r-md)] object-contain" />
+                  {scanning ? (
+                    <div className="absolute inset-0 overflow-hidden rounded-[var(--r-md)] bg-[rgba(10,14,26,0.35)]">
+                      <div className="aura-scan-line" />
+                      <p className="absolute bottom-2 left-0 right-0 text-center text-[13px] font-medium text-[var(--cyan)]">
+                        {scanStatus}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
               ) : (
                 <span className="text-[14px] text-[var(--text-2)]">Sürüşdürüb buraxın və ya seçin</span>
               )}
@@ -217,11 +325,20 @@ export function ReportPage() {
             </label>
           </div>
 
+          {yoloBadge ? (
+            <div className="flex items-center gap-2 rounded-[var(--r-md)] bg-[var(--cyan)] px-3 py-2.5 text-[13px] font-medium text-[var(--navy)]">
+              <Check className="h-5 w-5 shrink-0" strokeWidth={2.5} aria-hidden="true" />
+              <span>
+                YOLOv8 aşkarladı: {BARRIER_TYPE_LABEL[yoloBadge.type]} — {yoloBadge.confidence}% dəqiqliklə
+              </span>
+            </div>
+          ) : null}
+
           <div>
             <label className="mb-1 block text-[13px] text-[var(--text-2)]">Təsvir</label>
             <textarea
               rows={4}
-              className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[rgba(255,255,255,0.05)] px-3 py-2.5 text-[15px] text-[var(--text-1)]"
+              className="w-full rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-raised)] px-3 py-2.5 text-[15px] text-[var(--text-1)]"
               aria-describedby={errors.description ? 'desc-err' : undefined}
               {...register('description')}
             />

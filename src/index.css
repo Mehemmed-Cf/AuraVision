@@ -1,5 +1,3 @@
-@import 'leaflet/dist/leaflet.css';
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -62,14 +60,36 @@ body {
   min-height: 100vh;
 }
 
-.leaflet-container {
-  background: var(--navy);
+.mapboxgl-map {
   font-family: Inter, system-ui, sans-serif;
 }
 
-.aura-marker-wrap {
-  background: transparent !important;
-  border: none !important;
+.mapboxgl-ctrl-bottom-right {
+  z-index: 2;
+}
+
+@keyframes aura-scan-sweep {
+  0% {
+    top: 0;
+  }
+  100% {
+    top: 100%;
+  }
+}
+
+.aura-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--cyan),
+    transparent
+  );
+  box-shadow: 0 0 12px var(--cyan-glow);
+  animation: aura-scan-sweep 1.5s ease-in-out 2;
 }
 
 .auth-circuit-bg {

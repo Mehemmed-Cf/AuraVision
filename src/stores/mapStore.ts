@@ -38,6 +38,55 @@ export interface ProfileRoad {
 
 const CENTER = { lat: 40.4093, lng: 49.8671 };
 
+/** Approximate Greater Baku bounds (markers spread across the urban area). */
+const BAKU_BOUNDS = {
+  minLat: 40.325,
+  maxLat: 40.485,
+  minLng: 49.775,
+  maxLng: 49.965,
+} as const;
+
+/** Deterministic pseudo-random in [0, 1) for stable seed positions. */
+function fract01(n: number): number {
+  return n - Math.floor(n);
+}
+
+function hashPoint(i: number): { lat: number; lng: number } {
+  const a = fract01(Math.sin(i * 12.9898) * 43758.5453);
+  const b = fract01(Math.sin((i + 31) * 78.233) * 91375.123);
+  const c = fract01(Math.sin((i + 67) * 45.164) * 27183.291);
+  return {
+    lat: BAKU_BOUNDS.minLat + a * (BAKU_BOUNDS.maxLat - BAKU_BOUNDS.minLat) + (c - 0.5) * 0.004,
+    lng: BAKU_BOUNDS.minLng + b * (BAKU_BOUNDS.maxLng - BAKU_BOUNDS.minLng) + (c - 0.5) * 0.004,
+  };
+}
+
+const EXTRA_TYPES: BarrierType[] = [
+  'broken_ramp',
+  'high_curb',
+  'closed_elevator',
+  'poor_surface',
+  'no_ramp',
+];
+const EXTRA_SEV: BarrierSeverity[] = ['low', 'medium', 'high'];
+const AREA_LABEL: string[] = [
+  'Nəsimi',
+  'Nərimanov',
+  'Xətai',
+  'Yasamal',
+  'Nizami',
+  'Sabunçu',
+  'Suraxanı',
+  'Binəqədi',
+  'Sabail',
+  'Qaradağ',
+  'Xəzər sahil',
+  'H. Əliyev pr.',
+  '28 May',
+  ' Əcəmi',
+  'Lökbatan yaxınlığı',
+];
+
 function seedReports(): BarrierReport[] {
   const samples: Array<{
     latOffset: number;
@@ -73,7 +122,7 @@ function seedReports(): BarrierReport[] {
     { latOffset: 0.0082, lngOffset: -0.0028, type: 'no_ramp', severity: 'low', address: 'Tbilisi prospekti piyada xətti', description: 'Yaxın alternativ rampalı keçid mövcuddur.' },
   ];
 
-  return samples.map((sample, i) => ({
+  const named = samples.map((sample, i) => ({
     id: `seed-${i + 1}`,
     lat: CENTER.lat + sample.latOffset,
     lng: CENTER.lng + sample.lngOffset,
@@ -85,8 +134,34 @@ function seedReports(): BarrierReport[] {
     votes: 4 + (i % 15),
     imageUrl: `https://picsum.photos/300/200?random=${i + 1}`,
     createdAt: new Date(Date.now() - (i + 1) * 43200000).toISOString(),
-    inclusivityScore: 32 + (i * 7) % 62,
+    inclusivityScore: 32 + ((i * 7) % 62),
   }));
+
+  const GRID_EXTRA = 72;
+  const extra: BarrierReport[] = Array.from({ length: GRID_EXTRA }, (_, j) => {
+    const i = samples.length + j;
+    const pos = hashPoint(j + 1000);
+    const type = EXTRA_TYPES[j % EXTRA_TYPES.length]!;
+    const severity = EXTRA_SEV[j % EXTRA_SEV.length]!;
+    const area = AREA_LABEL[j % AREA_LABEL.length]!;
+    return {
+      id: `seed-${i + 1}`,
+      lat: pos.lat,
+      lng: pos.lng,
+      type,
+      severity,
+      address: `Bakı, ${area} — nöqtə ${j + 1}`,
+      description:
+        'Əlçatanlıq üçün yoxlama nöqtəsi (mock). Zəhmət olmasa mühitə uyğun alternativ seçin.',
+      reportedBy: 'İcma üzvü',
+      votes: 2 + (j % 20),
+      imageUrl: `https://picsum.photos/300/200?random=${200 + j}`,
+      createdAt: new Date(Date.now() - (j + 50) * 3600000).toISOString(),
+      inclusivityScore: 28 + ((j * 11) % 65),
+    };
+  });
+
+  return [...named, ...extra];
 }
 
 const SEEDED = seedReports();

@@ -56,15 +56,20 @@ export const useAuthStore = create<AuthState>()(
           set({ isLoading: false, error: 'Şifrə ən az 8 simvol olmalıdır' });
           return;
         }
-        const local = trimmed.split('@')[0]?.replace(/\./g, ' ') ?? 'İstifadəçi';
+        const existingUser = get().user;
+        const mobilityProfile =
+          existingUser?.email === trimmed
+            ? existingUser.mobilityProfile
+            : 'standard';
+
         const user: User = {
-          id: crypto.randomUUID(),
-          name: local.charAt(0).toUpperCase() + local.slice(1),
+          id: existingUser?.id ?? crypto.randomUUID(),
+          name: existingUser?.name ?? trimmed.split('@')[0] ?? 'İstifadəçi',
           email: trimmed,
-          mobilityProfile: 'standard',
-          reportsSubmitted: 0,
-          votesContributed: 0,
-          joinedAt: new Date().toISOString(),
+          mobilityProfile,
+          reportsSubmitted: existingUser?.reportsSubmitted ?? 0,
+          votesContributed: existingUser?.votesContributed ?? 0,
+          joinedAt: existingUser?.joinedAt ?? new Date().toISOString(),
         };
         set({
           user,
