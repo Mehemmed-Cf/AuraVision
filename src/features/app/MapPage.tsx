@@ -17,8 +17,35 @@ import { useRouteStore } from '@/stores/routeStore';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ?? '';
 
+interface OsrmAlternativeResponse {
+  routes?: Array<{
+    distance: number;
+    geometry: { coordinates: [number, number][] };
+  }>;
+}
+
+interface AlternativeRouteSummary {
+  distance: string;
+  lessBarriers: number;
+}
+
 function markerColor(severity: 'low' | 'medium' | 'high') {
   return severity === 'high' ? '#ef4444' : severity === 'medium' ? '#f59e0b' : '#10b981';
+}
+
+function toRad(d: number): number {
+  return (d * Math.PI) / 180;
+}
+
+function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 function RouteEndpointMarkers({ routePath }: { routePath: [number, number][] }) {
@@ -65,13 +92,20 @@ export function MapPage() {
   const seededReports = useMapStore((s) => s.seededReports);
   const submittedReports = useMapStore((s) => s.submittedReports);
   const voteReport = useMapStore((s) => s.voteReport);
+  const getAllReports = useMapStore((s) => s.getAllReports);
   const incrementVoteUser = useAuthStore((s) => s.incrementVotesContributed);
 
   const [filter, setFilter] = useState<BarrierType | 'all'>('all');
   const [selected, setSelected] = useState<BarrierReport | null>(null);
   const user = useAuthStore((s) => s.user);
   const routeResult = useRouteStore((s) => s.lastResult);
+  const fromAddress = useRouteStore((s) => s.fromAddress);
+  const toAddress = useRouteStore((s) => s.toAddress);
+  const setAlternativeWaypoints = useRouteStore((s) => s.setAlternativeWaypoints);
   const activeProfile = user?.mobilityProfile ?? 'standard';
+  const [aiAltLoading, setAiAltLoading] = useState(false);
+  const [aiAltSummary, setAiAltSummary] = useState<AlternativeRouteSummary | null>(null);
+  const [highlightedRoute, setHighlightedRoute] = useState<'standard' | 'ai'>('standard');
 
   const reports = useMemo(() => {
     const all = [...submittedReports, ...seededReports];
@@ -103,6 +137,15 @@ export function MapPage() {
     () => routeResult?.alternativeWaypoints ?? [],
     [routeResult],
   );
+
+  useEffect(() => {
+    if (alternativeRoutePath.length >= 2) {
+      setHighlightedRoute('ai');
+      return;
+    }
+    setHighlightedRoute('standard');
+    setAiAltSummary(null);
+  }, [alternativeRoutePath]);
 
   const routeGeoJson = useMemo(() => {
     if (routePath.length < 2) return null;
@@ -178,6 +221,62 @@ export function MapPage() {
       () => {},
     );
   }, []);
+
+  const onComputeAiRoute = useCallback(async () => {
+    if (!routeResult || !fromAddress || !toAddress || aiAltLoading) return;
+    setAiAltLoading(true);
+    try {
+      const url = `http://router.project-osrm.org/route/v1/foot/${fromAddress.lng},${fromAddress.lat};${toAddress.lng},${toAddress.lat}?overview=full&geometries=geojson&alternatives=3`;
+      const response = await fetch(url);
+      if (!response.ok) return;
+      const data = (await response.json()) as OsrmAlternativeResponse;
+      const routes = data.routes ?? [];
+      if (routes.length === 0) return;
+
+      const allReports = getAllReports();
+      const countBarriersNearWaypoints = (waypoints: [number, number][]) =>
+        allReports.filter((report) =>
+          waypoints.some(
+            ([lat, lng]) =>
+              haversineMeters({ lat, lng }, { lat: report.lat, lng: report.lng }) <= 150,
+          ),
+        ).length;
+
+      const candidates = routes.map((route) => {
+        const waypoints = route.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+        const distanceKm = route.distance / 1000;
+        return {
+          waypoints,
+          barrierCount: countBarriersNearWaypoints(waypoints),
+          distanceText: `${distanceKm.toFixed(1)} km`,
+        };
+      });
+
+      const best = candidates.sort((a, b) => a.barrierCount - b.barrierCount)[0];
+      if (!best) return;
+
+      const currentSignature = JSON.stringify(routeResult.waypoints);
+      const bestSignature = JSON.stringify(best.waypoints);
+      if (currentSignature !== bestSignature) {
+        setAlternativeWaypoints(best.waypoints);
+      }
+
+      setAiAltSummary({
+        distance: best.distanceText,
+        lessBarriers: Math.max(0, routeResult.barrierCount - best.barrierCount),
+      });
+      setHighlightedRoute('ai');
+    } finally {
+      setAiAltLoading(false);
+    }
+  }, [
+    aiAltLoading,
+    fromAddress,
+    getAllReports,
+    routeResult,
+    setAlternativeWaypoints,
+    toAddress,
+  ]);
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
@@ -282,7 +381,7 @@ export function MapPage() {
                 paint={{
                   'line-color': '#00D4FF',
                   'line-width': 14,
-                  'line-opacity': 0.15,
+                  'line-opacity': highlightedRoute === 'standard' ? 0.15 : 0.08,
                 }}
               />
               <Layer
@@ -291,7 +390,7 @@ export function MapPage() {
                 paint={{
                   'line-color': '#00D4FF',
                   'line-width': 5,
-                  'line-opacity': 0.9,
+                  'line-opacity': highlightedRoute === 'standard' ? 0.9 : 0.35,
                 }}
               />
             </Source>
@@ -325,7 +424,7 @@ export function MapPage() {
                 paint={{
                   'line-color': '#10B981',
                   'line-width': 14,
-                  'line-opacity': 0.15,
+                  'line-opacity': highlightedRoute === 'ai' ? 0.15 : 0.08,
                 }}
               />
               <Layer
@@ -334,7 +433,7 @@ export function MapPage() {
                 paint={{
                   'line-color': '#10B981',
                   'line-width': 5,
-                  'line-opacity': 0.9,
+                  'line-opacity': highlightedRoute === 'ai' ? 0.9 : 0.35,
                 }}
               />
             </Source>
@@ -367,11 +466,70 @@ export function MapPage() {
 
       {alternativeRoutePath.length >= 2 ? (
         <div
-          className="rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-card)]/90 px-3 py-2 text-[12px] text-[var(--text-2)]"
-          style={{ position: 'fixed', top: '126px', right: '12px', zIndex: 1000 }}
+          className="rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-card)] px-3 py-2 text-[12px] text-[var(--text-2)]"
+          style={{ position: 'fixed', top: '124px', right: '16px', zIndex: 500 }}
         >
           <p>🔵 Standart marşrut</p>
-          <p>🟢 AI marşrutu</p>
+          <p>🟢 AI marşrutu (maneəsiz)</p>
+        </div>
+      ) : null}
+
+      {routePath.length >= 2 && routeResult ? (
+        <div
+          className="rounded-[var(--r-lg)] border border-[var(--navy-border)] bg-[var(--navy-card)] p-4"
+          style={{
+            position: 'fixed',
+            bottom: '72px',
+            left: '16px',
+            right: '16px',
+            zIndex: 500,
+          }}
+        >
+          {alternativeRoutePath.length >= 2 ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[13px] text-[var(--text-2)]">🔵 Standart: {routeResult.distance}</span>
+                <span className="text-[13px] text-[var(--text-2)]">
+                  🟢 AI: {aiAltSummary?.distance ?? routeResult.distance} — {aiAltSummary?.lessBarriers ?? 0} maneə az
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHighlightedRoute('standard')}
+                  className="rounded-[var(--r-md)] border border-[var(--navy-border)] px-3 py-2 text-[12px] font-semibold text-[var(--text-2)]"
+                  style={{ opacity: highlightedRoute === 'standard' ? 1 : 0.6 }}
+                >
+                  Standartı göstər
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHighlightedRoute('ai')}
+                  className="rounded-[var(--r-md)] border border-[var(--cyan)] bg-[var(--cyan-dim)] px-3 py-2 text-[12px] font-semibold text-[var(--cyan)]"
+                  style={{ opacity: highlightedRoute === 'ai' ? 1 : 0.6 }}
+                >
+                  AI-ni göstər
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[13px] text-[var(--text-2)]">Standart marşrut</p>
+                <p className="text-[13px] text-[var(--text-1)]">
+                  {routeResult.distance} • {routeResult.duration}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void onComputeAiRoute()}
+                disabled={aiAltLoading || !fromAddress || !toAddress}
+                className="rounded-[var(--r-md)] border border-[var(--cyan)] bg-[var(--cyan-dim)] px-4 py-2 text-[13px] font-semibold text-[var(--cyan)] disabled:opacity-60"
+              >
+                {aiAltLoading ? 'Hesaplanır...' : '🤖 AI Marşrutu'}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
 

@@ -64,19 +64,6 @@ interface RoutePointSelection {
   lng: number;
 }
 
-interface OsrmAlternativeResponse {
-  routes?: Array<{
-    distance: number;
-    geometry: { coordinates: [number, number][] };
-  }>;
-}
-
-interface AlternativeSummary {
-  durationText: string;
-  distanceText: string;
-  lessBarriers: number;
-}
-
 function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const toRad = (d: number) => (d * Math.PI) / 180;
   const R = 6371000;
@@ -242,18 +229,21 @@ export function DashboardPage() {
   const routeLoading = useRouteStore((s) => s.isLoading);
   const routeResult = useRouteStore((s) => s.lastResult);
   const clearRoute = useRouteStore((s) => s.clearResult);
-  const setAlternativeWaypoints = useRouteStore((s) => s.setAlternativeWaypoints);
   const routeError = useRouteStore((s) => s.error);
+  const storedFromAddress = useRouteStore((s) => s.fromAddress);
+  const storedToAddress = useRouteStore((s) => s.toAddress);
+  const storedAiCommentary = useRouteStore((s) => s.aiCommentary);
+  const setFromAddressStore = useRouteStore((s) => s.setFromAddress);
+  const setToAddressStore = useRouteStore((s) => s.setToAddress);
+  const setAiCommentaryStore = useRouteStore((s) => s.setAiCommentary);
 
   const [mockKm] = useState(() => (4 + Math.random() * 2).toFixed(1));
-  const [fromAddress, setFromAddress] = useState('');
-  const [toAddress, setToAddress] = useState('');
+  const [fromAddress, setFromAddress] = useState(storedFromAddress?.label ?? '');
+  const [toAddress, setToAddress] = useState(storedToAddress?.label ?? '');
   const [fromSelection, setFromSelection] = useState<RoutePointSelection | null>(null);
   const [toSelection, setToSelection] = useState<RoutePointSelection | null>(null);
-  const [aiCommentary, setAiCommentary] = useState<string | null>(null);
+  const [aiCommentary, setAiCommentary] = useState<string | null>(storedAiCommentary ?? null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiAltLoading, setAiAltLoading] = useState(false);
-  const [aiAltResult, setAiAltResult] = useState<AlternativeSummary | null>(null);
   const lastCommentaryRequestRef = useRef<string | null>(null);
 
   const fillFromGeolocation = useCallback(() => {
@@ -276,26 +266,51 @@ export function DashboardPage() {
             data.display_name ?? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
           setFromAddress(label);
           setFromSelection({ displayName: label, lat: latitude, lng: longitude });
+          setFromAddressStore({ label, lat: latitude, lng: longitude });
         } catch {
           const label = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
           setFromAddress(label);
           setFromSelection({ displayName: label, lat: latitude, lng: longitude });
+          setFromAddressStore({ label, lat: latitude, lng: longitude });
         }
       },
       () => {},
     );
-  }, []);
+  }, [setFromAddressStore]);
 
   useEffect(() => {
-    fillFromGeolocation();
-  }, [fillFromGeolocation]);
+    if (storedFromAddress) {
+      setFromAddress(storedFromAddress.label);
+      setFromSelection({
+        displayName: storedFromAddress.label,
+        lat: storedFromAddress.lat,
+        lng: storedFromAddress.lng,
+      });
+    } else {
+      fillFromGeolocation();
+    }
+    if (storedToAddress) {
+      setToAddress(storedToAddress.label);
+      setToSelection({
+        displayName: storedToAddress.label,
+        lat: storedToAddress.lat,
+        lng: storedToAddress.lng,
+      });
+    }
+    if (storedAiCommentary) {
+      setAiCommentary(storedAiCommentary);
+    }
+  }, [fillFromGeolocation, storedFromAddress, storedToAddress, storedAiCommentary]);
+
+  useEffect(() => {
+    setAiCommentary(storedAiCommentary ?? null);
+  }, [storedAiCommentary]);
 
   useEffect(() => {
     let active = true;
     const generateCommentary = async () => {
       if (!routeResult) {
         lastCommentaryRequestRef.current = null;
-        setAiCommentary(null);
         setAiLoading(false);
         return;
       }
@@ -344,6 +359,14 @@ export function DashboardPage() {
             routeResult.barrierCount,
           ),
       );
+      setAiCommentaryStore(
+        commentary ??
+          buildFallbackCommentary(
+            routeResult.inclusivityIndex,
+            profileLabel,
+            routeResult.barrierCount,
+          ),
+      );
       setAiLoading(false);
     };
 
@@ -352,7 +375,7 @@ export function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [routeResult, getAllReports, mobility]);
+  }, [routeResult, getAllReports, mobility, setAiCommentaryStore]);
 
   if (!user) return null;
 
@@ -369,63 +392,6 @@ export function DashboardPage() {
       toLat: toSelection.lat,
       toLng: toSelection.lng,
     });
-    setAiAltResult(null);
-  };
-
-  const onAiAlternative = async () => {
-    if (!routeResult || !fromSelection || !toSelection || aiAltLoading) return;
-    setAiAltLoading(true);
-    setAiAltResult(null);
-    try {
-      const from = `${fromSelection.lng},${fromSelection.lat}`;
-      const to = `${toSelection.lng},${toSelection.lat}`;
-      const url = `http://router.project-osrm.org/route/v1/foot/${from};${to}?overview=full&geometries=geojson&alternatives=3`;
-      const response = await fetch(url);
-      if (!response.ok) return;
-      const data = (await response.json()) as OsrmAlternativeResponse;
-      const routes = data.routes ?? [];
-      if (routes.length === 0) return;
-
-      const allReports = getAllReports();
-      const countBarriersNearWaypoints = (waypoints: [number, number][]) =>
-        allReports.filter((report) =>
-          waypoints.some(
-            ([lat, lng]) =>
-              haversineMeters({ lat, lng }, { lat: report.lat, lng: report.lng }) <= 150,
-          ),
-        ).length;
-
-      const currentPath = routeResult.waypoints;
-      const currentBarriers = routeResult.barrierCount;
-      const profile = mobility;
-      const walkingSpeed = profile === 'wheelchair' || profile === 'stroller' ? 3.0 : 4.5;
-
-      const candidates = routes.map((route) => {
-        const waypoints = route.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
-        const barrierCount = countBarriersNearWaypoints(waypoints);
-        const distanceKm = route.distance / 1000;
-        const durationMin = Math.ceil((distanceKm / walkingSpeed) * 60);
-        const distanceText = `${distanceKm.toFixed(1)} km`;
-        const durationText = `${durationMin} dəq`;
-        return { waypoints, barrierCount, distanceText, durationText };
-      });
-
-      const best = candidates.sort((a, b) => a.barrierCount - b.barrierCount)[0];
-      if (!best) return;
-      const currentSig = JSON.stringify(currentPath);
-      const bestSig = JSON.stringify(best.waypoints);
-      if (currentSig !== bestSig) {
-        setAlternativeWaypoints(best.waypoints);
-      }
-
-      setAiAltResult({
-        durationText: best.durationText,
-        distanceText: best.distanceText,
-        lessBarriers: Math.max(0, currentBarriers - best.barrierCount),
-      });
-    } finally {
-      setAiAltLoading(false);
-    }
   };
 
   return (
@@ -525,10 +491,16 @@ export function DashboardPage() {
               onChange={(v) => {
                 setFromAddress(v);
                 setFromSelection(null);
+                setFromAddressStore(null);
               }}
               onPick={(sel) => {
                 setFromAddress(sel.displayName);
                 setFromSelection(sel);
+                setFromAddressStore({
+                  label: sel.displayName,
+                  lat: sel.lat,
+                  lng: sel.lng,
+                });
               }}
               onLocateClick={fillFromGeolocation}
             />
@@ -542,10 +514,16 @@ export function DashboardPage() {
               onChange={(v) => {
                 setToAddress(v);
                 setToSelection(null);
+                setToAddressStore(null);
               }}
               onPick={(sel) => {
                 setToAddress(sel.displayName);
                 setToSelection(sel);
+                setToAddressStore({
+                  label: sel.displayName,
+                  lat: sel.lat,
+                  lng: sel.lng,
+                });
               }}
             />
           </div>
@@ -637,20 +615,6 @@ export function DashboardPage() {
             >
               Xəritədə Gör
             </button>
-            <button
-              type="button"
-              onClick={() => void onAiAlternative()}
-              disabled={aiAltLoading}
-              className="h-12 w-full rounded-[var(--r-md)] border-[1.5px] border-[var(--cyan)] bg-transparent font-semibold text-[var(--cyan)] disabled:opacity-70"
-            >
-              {aiAltLoading ? 'AI hesablayır...' : '🤖 AI Alternativ Marşrut Göstər'}
-            </button>
-            {aiAltResult ? (
-              <div className="rounded-[var(--r-md)] border border-[var(--success)] bg-[rgba(16,185,129,0.1)] px-3 py-2 text-[13px] text-[var(--success)]">
-                ✓ AI marşrutu hazırdır — {aiAltResult.durationText}, {aiAltResult.distanceText},{' '}
-                {aiAltResult.lessBarriers} maneə az
-              </div>
-            ) : null}
           </motion.div>
         ) : null}
       </section>
