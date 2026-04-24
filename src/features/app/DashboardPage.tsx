@@ -28,6 +28,20 @@ function formatDate(d: Date) {
   });
 }
 
+function buildFallbackCommentary(
+  inclusivityIndex: number,
+  profileLabel: string,
+  barrierCount: number,
+): string {
+  if (inclusivityIndex > 70) {
+    return `Bu marşrut ${profileLabel} profili üçün uyğundur. Ciddi maneə aşkarlanmadı.`;
+  }
+  if (inclusivityIndex >= 40) {
+    return `Bu marşrut ${barrierCount} maneə ehtiva edir. Ehtiyatlı olmağı tövsiyə edirik.`;
+  }
+  return `Bu marşrut ${profileLabel} profili üçün çətin hesab edilir. Alternativ marşrut nəzərə alın.`;
+}
+
 const statCardVariants = {
   hidden: { opacity: 0, y: 12 },
   show: (i: number) => ({
@@ -48,6 +62,19 @@ interface RoutePointSelection {
   displayName: string;
   lat: number;
   lng: number;
+}
+
+interface OsrmAlternativeResponse {
+  routes?: Array<{
+    distance: number;
+    geometry: { coordinates: [number, number][] };
+  }>;
+}
+
+interface AlternativeSummary {
+  durationText: string;
+  distanceText: string;
+  lessBarriers: number;
 }
 
 function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -215,6 +242,7 @@ export function DashboardPage() {
   const routeLoading = useRouteStore((s) => s.isLoading);
   const routeResult = useRouteStore((s) => s.lastResult);
   const clearRoute = useRouteStore((s) => s.clearResult);
+  const setAlternativeWaypoints = useRouteStore((s) => s.setAlternativeWaypoints);
   const routeError = useRouteStore((s) => s.error);
 
   const [mockKm] = useState(() => (4 + Math.random() * 2).toFixed(1));
@@ -224,6 +252,9 @@ export function DashboardPage() {
   const [toSelection, setToSelection] = useState<RoutePointSelection | null>(null);
   const [aiCommentary, setAiCommentary] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiAltLoading, setAiAltLoading] = useState(false);
+  const [aiAltResult, setAiAltResult] = useState<AlternativeSummary | null>(null);
+  const lastCommentaryRequestRef = useRef<string | null>(null);
 
   const fillFromGeolocation = useCallback(() => {
     if (!navigator.geolocation) return;
@@ -263,13 +294,19 @@ export function DashboardPage() {
     let active = true;
     const generateCommentary = async () => {
       if (!routeResult) {
+        lastCommentaryRequestRef.current = null;
         setAiCommentary(null);
         setAiLoading(false);
         return;
       }
+      const profileLabel = mobilityLabel[mobility] ?? mobility;
+      const requestKey = `${profileLabel}::${routeResult.barrierCount}::${routeResult.inclusivityIndex}::${routeResult.distance}::${routeResult.duration}`;
+      if (lastCommentaryRequestRef.current === requestKey) {
+        return;
+      }
+      lastCommentaryRequestRef.current = requestKey;
 
       setAiLoading(true);
-      setAiCommentary(null);
 
       const nearbyReports = getAllReports().filter((report) =>
         routeResult.waypoints.some(
@@ -283,18 +320,30 @@ export function DashboardPage() {
         return acc;
       }, {});
 
-      const commentary = await getRouteCommentary({
-        mobilityProfile: mobilityLabel[mobility] ?? mobility,
-        inclusivityIndex: routeResult.inclusivityIndex,
-        barrierCount: routeResult.barrierCount,
-        barrierTypeCounts,
-        distance: routeResult.distance,
-        duration: routeResult.duration,
-        warnings: routeResult.warnings,
-      });
+      let commentary: string | null = null;
+      try {
+        commentary = await getRouteCommentary({
+          mobilityProfile: profileLabel,
+          inclusivityIndex: routeResult.inclusivityIndex,
+          barrierCount: routeResult.barrierCount,
+          barrierTypeCounts,
+          distance: routeResult.distance,
+          duration: routeResult.duration,
+          warnings: routeResult.warnings,
+        });
+      } catch {
+        commentary = null;
+      }
 
       if (!active) return;
-      setAiCommentary(commentary);
+      setAiCommentary(
+        commentary ??
+          buildFallbackCommentary(
+            routeResult.inclusivityIndex,
+            profileLabel,
+            routeResult.barrierCount,
+          ),
+      );
       setAiLoading(false);
     };
 
@@ -320,6 +369,63 @@ export function DashboardPage() {
       toLat: toSelection.lat,
       toLng: toSelection.lng,
     });
+    setAiAltResult(null);
+  };
+
+  const onAiAlternative = async () => {
+    if (!routeResult || !fromSelection || !toSelection || aiAltLoading) return;
+    setAiAltLoading(true);
+    setAiAltResult(null);
+    try {
+      const from = `${fromSelection.lng},${fromSelection.lat}`;
+      const to = `${toSelection.lng},${toSelection.lat}`;
+      const url = `http://router.project-osrm.org/route/v1/foot/${from};${to}?overview=full&geometries=geojson&alternatives=3`;
+      const response = await fetch(url);
+      if (!response.ok) return;
+      const data = (await response.json()) as OsrmAlternativeResponse;
+      const routes = data.routes ?? [];
+      if (routes.length === 0) return;
+
+      const allReports = getAllReports();
+      const countBarriersNearWaypoints = (waypoints: [number, number][]) =>
+        allReports.filter((report) =>
+          waypoints.some(
+            ([lat, lng]) =>
+              haversineMeters({ lat, lng }, { lat: report.lat, lng: report.lng }) <= 150,
+          ),
+        ).length;
+
+      const currentPath = routeResult.waypoints;
+      const currentBarriers = routeResult.barrierCount;
+      const profile = mobility;
+      const walkingSpeed = profile === 'wheelchair' || profile === 'stroller' ? 3.0 : 4.5;
+
+      const candidates = routes.map((route) => {
+        const waypoints = route.geometry.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+        const barrierCount = countBarriersNearWaypoints(waypoints);
+        const distanceKm = route.distance / 1000;
+        const durationMin = Math.ceil((distanceKm / walkingSpeed) * 60);
+        const distanceText = `${distanceKm.toFixed(1)} km`;
+        const durationText = `${durationMin} dəq`;
+        return { waypoints, barrierCount, distanceText, durationText };
+      });
+
+      const best = candidates.sort((a, b) => a.barrierCount - b.barrierCount)[0];
+      if (!best) return;
+      const currentSig = JSON.stringify(currentPath);
+      const bestSig = JSON.stringify(best.waypoints);
+      if (currentSig !== bestSig) {
+        setAlternativeWaypoints(best.waypoints);
+      }
+
+      setAiAltResult({
+        durationText: best.durationText,
+        distanceText: best.distanceText,
+        lessBarriers: Math.max(0, currentBarriers - best.barrierCount),
+      });
+    } finally {
+      setAiAltLoading(false);
+    }
   };
 
   return (
@@ -499,7 +605,11 @@ export function DashboardPage() {
                 </div>
               ) : aiCommentary ? (
                 <p className="text-[13px] leading-relaxed text-[var(--text-2)]">{aiCommentary}</p>
-              ) : null}
+              ) : (
+                <p className="text-[13px] leading-relaxed text-[var(--text-2)]">
+                  Şərh hazırlanır...
+                </p>
+              )}
             </div>
             <div className="flex justify-between gap-4 text-[14px] text-[var(--text-2)]">
               <span>Məsafə: {routeResult.distance}</span>
@@ -527,6 +637,20 @@ export function DashboardPage() {
             >
               Xəritədə Gör
             </button>
+            <button
+              type="button"
+              onClick={() => void onAiAlternative()}
+              disabled={aiAltLoading}
+              className="h-12 w-full rounded-[var(--r-md)] border-[1.5px] border-[var(--cyan)] bg-transparent font-semibold text-[var(--cyan)] disabled:opacity-70"
+            >
+              {aiAltLoading ? 'AI hesablayır...' : '🤖 AI Alternativ Marşrut Göstər'}
+            </button>
+            {aiAltResult ? (
+              <div className="rounded-[var(--r-md)] border border-[var(--success)] bg-[rgba(16,185,129,0.1)] px-3 py-2 text-[13px] text-[var(--success)]">
+                ✓ AI marşrutu hazırdır — {aiAltResult.durationText}, {aiAltResult.distanceText},{' '}
+                {aiAltResult.lessBarriers} maneə az
+              </div>
+            ) : null}
           </motion.div>
         ) : null}
       </section>

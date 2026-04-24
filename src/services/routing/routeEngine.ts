@@ -22,7 +22,6 @@ export interface RouteResult {
 interface OsrmResponse {
   routes?: Array<{
     distance: number;
-    duration: number;
     geometry: { coordinates: [number, number][] };
   }>;
 }
@@ -167,9 +166,11 @@ export async function computeRoute(
 
   const waypoints: [number, number][] = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
 
+  const profile = req.profile;
+  const WALKING_SPEED_KMH = profile === 'wheelchair' || profile === 'stroller' ? 3.0 : 4.5;
   const distanceKm = route.distance / 1000;
   const distance = `${distanceKm.toFixed(1)} km`;
-  const durationMin = Math.ceil(route.duration / 60);
+  const durationMin = Math.ceil((distanceKm / WALKING_SPEED_KMH) * 60);
   const duration = `${durationMin} dəq`;
 
   const { penalty, relevantBarriers } = calcBarrierPenalty(

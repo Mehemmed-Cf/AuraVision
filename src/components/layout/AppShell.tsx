@@ -1,9 +1,10 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { LayoutDashboard, Map, Plus, User } from 'lucide-react';
+import { LayoutDashboard, Map, Plus, ShoppingBag, User } from 'lucide-react';
 import { useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useMapStore } from '@/stores/mapStore';
+import { useRewardsStore } from '@/stores/rewardsStore';
 
 function initials(name: string): string {
   const p = name.trim().split(/\s+/).filter(Boolean);
@@ -16,6 +17,7 @@ const tabs = [
   { to: '/dashboard', label: 'Əsas', icon: LayoutDashboard },
   { to: '/map', label: 'Xəritə', icon: Map },
   { to: '/report', label: 'Bildir', icon: Plus },
+  { to: '/marketplace', label: 'Market', icon: ShoppingBag },
   { to: '/profile', label: 'Profil', icon: User },
 ] as const;
 
@@ -28,6 +30,7 @@ const pageVariants = {
 export function AppShell() {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
+  const points = useRewardsStore((s) => s.points);
   const setActiveProfile = useMapStore((s) => s.setActiveProfile);
 
   useEffect(() => {
@@ -82,11 +85,17 @@ export function AppShell() {
               />
             </svg>
           </button>
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--cyan)] text-[13px] font-bold text-[var(--navy)]"
-            aria-hidden="true"
-          >
-            {ini}
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-[var(--cyan)] bg-[var(--cyan-dim)] px-2.5 py-1 text-[12px] font-semibold text-[var(--cyan)]">
+              ⭐ {points}/100
+            </span>
+            <span className="max-w-[110px] truncate text-[13px] text-[var(--text-2)]">{user?.name ?? 'İstifadəçi'}</span>
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--cyan)] text-[13px] font-bold text-[var(--navy)]"
+              aria-hidden="true"
+            >
+              {ini}
+            </div>
           </div>
         </div>
       </header>

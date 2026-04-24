@@ -5,6 +5,8 @@ import { DashboardPage } from '@/features/app/DashboardPage';
 import { LastMeterMapPage } from '@/features/app/LastMeterMapPage';
 import { LedgerNasimiPage } from '@/features/app/LedgerNasimiPage';
 import { MapPage } from '@/features/app/MapPage';
+import { MarketplaceCartPage } from '@/features/app/MarketplaceCartPage';
+import { MarketplacePage } from '@/features/app/MarketplacePage';
 import { ProfilePage } from '@/features/app/ProfilePage';
 import { ReportPage } from '@/features/app/ReportPage';
 import { LoginPage } from '@/features/auth/LoginPage';
@@ -53,6 +55,8 @@ export default function App() {
           <Route path="/last-meter" element={<LastMeterMapPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/report" element={<ReportPage />} />
+          <Route path="/marketplace" element={<MarketplacePage />} />
+          <Route path="/marketplace/cart" element={<MarketplaceCartPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
       </Route>

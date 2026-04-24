@@ -10,6 +10,24 @@ export interface RouteCommentaryInput {
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL = 'gpt-4o-mini';
+const COMMENTARY_CACHE_TTL_MS = 60_000;
+const OPENAI_MIN_CALL_GAP_MS = 2_000;
+
+interface CommentaryCacheEntry {
+  value: string | null;
+  createdAt: number;
+}
+
+const commentaryCache = new Map<string, CommentaryCacheEntry>();
+let lastOpenAiCallAt = 0;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getCacheKey(input: RouteCommentaryInput): string {
+  return `${input.mobilityProfile}::${input.barrierCount}`;
+}
 
 function formatBarrierTypeCounts(counts: Record<string, number>): string {
   const entries = Object.entries(counts).filter(([, value]) => value > 0);
@@ -20,6 +38,12 @@ function formatBarrierTypeCounts(counts: Record<string, number>): string {
 export async function getRouteCommentary(input: RouteCommentaryInput): Promise<string | null> {
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
   if (!apiKey) return null;
+  const cacheKey = getCacheKey(input);
+  const now = Date.now();
+  const cached = commentaryCache.get(cacheKey);
+  if (cached && now - cached.createdAt <= COMMENTARY_CACHE_TTL_MS) {
+    return cached.value;
+  }
 
   const prompt = [
     'Aşağıdakı marşrut məlumatına əsasən Azərbaycan dilində 2-3 cümləlik şəxsiləşdirilmiş şərh yaz.',
@@ -36,6 +60,12 @@ export async function getRouteCommentary(input: RouteCommentaryInput): Promise<s
   ].join('\n');
 
   try {
+    const elapsed = now - lastOpenAiCallAt;
+    if (elapsed < OPENAI_MIN_CALL_GAP_MS) {
+      await sleep(OPENAI_MIN_CALL_GAP_MS - elapsed);
+    }
+
+    lastOpenAiCallAt = Date.now();
     const response = await fetch(OPENAI_URL, {
       method: 'POST',
       headers: {
@@ -61,7 +91,9 @@ export async function getRouteCommentary(input: RouteCommentaryInput): Promise<s
       choices?: Array<{ message?: { content?: string } }>;
     };
     const content = data.choices?.[0]?.message?.content?.trim();
-    return content && content.length > 0 ? content : null;
+    const value = content && content.length > 0 ? content : null;
+    commentaryCache.set(cacheKey, { value, createdAt: Date.now() });
+    return value;
   } catch {
     return null;
   }

@@ -9,6 +9,7 @@ import type { AddressSuggestion } from '@/services/locationService';
 import { useAuthStore } from '@/stores/authStore';
 import { BARRIER_TYPE_LABEL, type BarrierType } from '@/stores/mapStore';
 import { useMapStore } from '@/stores/mapStore';
+import { useRewardsStore } from '@/stores/rewardsStore';
 import { reportFormSchema, type ReportFormValues } from './reportSchema';
 
 const TYPES: BarrierType[] = [
@@ -57,6 +58,7 @@ type YoloPick = (typeof YOLO_DETECTIONS)[number];
 export function ReportPage() {
   const addReport = useMapStore((s) => s.addReport);
   const incrementReports = useAuthStore((s) => s.incrementReportsSubmitted);
+  const addUploadReward = useRewardsStore((s) => s.addUploadReward);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const scanTimeoutsRef = useRef<number[]>([]);
@@ -170,6 +172,9 @@ export function ReportPage() {
     });
     setInclusivity(score);
     incrementReports();
+    if (preview) {
+      addUploadReward();
+    }
     setDone(true);
   };
 

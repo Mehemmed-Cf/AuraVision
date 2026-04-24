@@ -23,6 +23,7 @@ export interface CalculatedRoute {
   barrierCount: number;
   avoidedBarriers: number;
   waypoints: [number, number][];
+  alternativeWaypoints?: [number, number][];
   warnings: string[];
   profileRoadIds: string[];
 }
@@ -34,10 +35,11 @@ interface RouteState {
   lastResult: CalculatedRoute | null;
   error: string | null;
   calculateRoute: (opts: RouteOptions) => Promise<CalculatedRoute | null>;
+  setAlternativeWaypoints: (waypoints: [number, number][]) => void;
   clearResult: () => void;
 }
 
-export const useRouteStore = create<RouteState>((set) => ({
+export const useRouteStore = create<RouteState>((set, get) => ({
   isLoading: false,
   lastResult: null,
   error: null,
@@ -82,5 +84,11 @@ export const useRouteStore = create<RouteState>((set) => ({
 
     set({ isLoading: false, lastResult: result, error: null });
     return result;
+  },
+
+  setAlternativeWaypoints: (waypoints) => {
+    const current = get().lastResult;
+    if (!current) return;
+    set({ lastResult: { ...current, alternativeWaypoints: waypoints } });
   },
 }));

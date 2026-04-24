@@ -99,6 +99,10 @@ export function MapPage() {
   }, [routeResult, profileRoads]);
 
   const routePath = useMemo(() => routeResult?.waypoints ?? [], [routeResult]);
+  const alternativeRoutePath = useMemo(
+    () => routeResult?.alternativeWaypoints ?? [],
+    [routeResult],
+  );
 
   const routeGeoJson = useMemo(() => {
     if (routePath.length < 2) return null;
@@ -109,6 +113,16 @@ export function MapPage() {
       geometry: { type: 'LineString' as const, coordinates },
     };
   }, [routePath]);
+
+  const alternativeRouteGeoJson = useMemo(() => {
+    if (alternativeRoutePath.length < 2) return null;
+    const coordinates = alternativeRoutePath.map(([lat, lng]) => [lng, lat] as [number, number]);
+    return {
+      type: 'Feature' as const,
+      properties: {},
+      geometry: { type: 'LineString' as const, coordinates },
+    };
+  }, [alternativeRoutePath]);
 
   const fallbackGeoJson = useMemo(() => {
     if (routePath.length > 1) return null;
@@ -303,6 +317,28 @@ export function MapPage() {
               />
             </Source>
           ) : null}
+          {alternativeRouteGeoJson ? (
+            <Source id="aura-route-alt" type="geojson" data={alternativeRouteGeoJson}>
+              <Layer
+                id="aura-route-alt-glow"
+                type="line"
+                paint={{
+                  'line-color': '#10B981',
+                  'line-width': 14,
+                  'line-opacity': 0.15,
+                }}
+              />
+              <Layer
+                id="aura-route-alt-core"
+                type="line"
+                paint={{
+                  'line-color': '#10B981',
+                  'line-width': 5,
+                  'line-opacity': 0.9,
+                }}
+              />
+            </Source>
+          ) : null}
           {reports.map((r) => (
             <Marker key={r.id} longitude={r.lng} latitude={r.lat} anchor="center">
               <button
@@ -328,6 +364,16 @@ export function MapPage() {
           <RouteEndpointMarkers routePath={routePath} />
         </Map>
       </div>
+
+      {alternativeRoutePath.length >= 2 ? (
+        <div
+          className="rounded-[var(--r-md)] border border-[var(--navy-border)] bg-[var(--navy-card)]/90 px-3 py-2 text-[12px] text-[var(--text-2)]"
+          style={{ position: 'fixed', top: '126px', right: '12px', zIndex: 1000 }}
+        >
+          <p>🔵 Standart marşrut</p>
+          <p>🟢 AI marşrutu</p>
+        </div>
+      ) : null}
 
       <button
         type="button"
